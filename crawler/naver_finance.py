@@ -1,5 +1,6 @@
 import re
 import time
+import json
 
 import pandas as pd
 import requests
@@ -14,13 +15,6 @@ UA = UserAgent()
 HEADERS = {
     'User-Agent': UA.random,
 }
-
-
-# TODO
-# 의논 할 것
-# - 날짜를 보는 것보다 페이지 갯수로 제한하는 것이 좋을까?
-#   (사람의 행동이 날짜보다 페이지 넘기는 것에 제한되니까)
-# - AWS람다에서 멀티스레드 멀티프로세싱 적용 어떻게하지?
 
 
 class Crawler:
@@ -63,14 +57,39 @@ class Crawler:
         :param page: 페이지 번호
         :return: 한 페이지의 게시글들을 dict of list 로 반환.
         """
+
         url = BASE_URL + '/item/board.naver?code=' + code + '&page=%d' % page
         req = requests.get(url, headers=HEADERS)
         soup = BeautifulSoup(req.text, 'lxml')
+
         title_list = soup.select('td.title > a')
         agree_list = soup.select('td:nth-child(5) > strong')
+        idx_list = [idx for idx, agree in enumerate(agree_list) if int(agree.text) >= 10]
+        top_post_list = [title_list[x] for x in idx_list]
 
-        def fetch_by_post(title_atag):
-            r = requests.get(BASE_URL + title_atag.get('href'))
+        def fetch_comments_by_post(nid):
+            comment_url = "https://apis.naver.com/commentBox/cbox/" \
+                          "web_naver_list_jsonp.json?ticket=finance" \
+                          "&templateId=default&pool=cbox12&lang=ko&"\
+                          f"country=KR&objectId={nid}"
+            headers = {
+                'User-Agent': UA.random,
+                'referer': 'https://finance.naver.com/item/board_read.naver?'\
+                           f'code=112040&nid={nid}&st=&sw=&page=1'
+            }
+            r = requests.get(comment_url, headers=headers)
+            comments_list = re.findall(r'(?<={"commentList":).*(?=,"pageModel")', r.text)[0]
+            comments_list = json.loads(comments_list)
+
+            comments = []
+            keys = ['contents', 'replyAllCount', 'userName', 'modTime', 'sympathyCount', 'antipathyCount']
+            for comment in comments_list:
+                comments.append({x: comment[x] for x in keys})
+            return comments
+
+        def fetch_by_post(top_post):
+            href = top_post.get('href')
+            r = requests.get(BASE_URL + href)
             content_soup = BeautifulSoup(r.text, 'lxml')
 
             date = content_soup.select_one('tr > th.gray03.p9.tah').text
@@ -81,37 +100,30 @@ class Crawler:
             content = content_soup.select_one('#body')
             content = content.getText().replace(u'\xa0\r', '\n')
             content = content.replace('\r', '\n')
-
-            href = title_atag.get('href')
+            nid = int(re.search(r'(?<=nid=)[0-9]+', href)[0])
+            comments = fetch_comments_by_post(nid)
 
             posts = {}
-            posts['title'] = title_atag.get('title')
-            posts['nid'] = int(re.search('(?<=nid=)[0-9]+', href)[0])
+            posts['title'] = top_post.get('title')
+            posts['nid'] = nid
             posts['date'] = date
             posts['view'] = post_info[1]
             posts['agree'] = post_info[3]
             posts['disagree'] = post_info[5]
             posts['opinion'] = post_info[7]
             posts['content'] = content
+            posts['comments'] = comments
             return posts
 
         pool = multiprocessing.pool.ThreadPool(10)
-        posts = [pool.apply_async(fetch_by_post, args={title_atag: title_atag})
-                 for title_atag in title_atags]
+        posts = [pool.apply_async(fetch_by_post, args={top_post: top_post})
+                 for top_post in top_post_list]
         pool.close()
         pool.join()
         posts = [post.get() for post in posts]
 
         # list of dict -> dict of list
         posts = {k: [dic[k] for dic in posts] for k in posts[0]}
-
-        db_latest_nid = self.db.latest_nid.get(code, 0)
-        # 최신글 부터 DB에 저장된 날짜까지 다 크롤링 한 경우, 중단!
-        # 단, 아래 코드가 정상적으로 작동하려면
-        # min(all fetched posts' nid) <= min(this page's posts' nid) 이어야 함.
-        if min(posts['nid']) < db_latest_nid:
-            event.set()
-
         return posts
 
     def fetch_by_code(self, code, datum_point=10):
@@ -149,54 +161,6 @@ class Crawler:
 
         print('\r' + code + ': Done.', end=' ')
         return df
-
-    def fetch_daily_top_posts(self, code, datum_point=10, total_page=30):
-        """
-
-        :param code:
-        :param datum_point:
-        :param total_page:
-        :return:
-        """
-        for i in range(1, total_page + 1):
-            req = requests.get(BASE_URL + '/item/board.naver?code=' + code)
-        soup = BeautifulSoup(req.text, 'html.parser')
-
-        pool = multiprocessing.Pool(self.n_process)
-        m = multiprocessing.Manager()
-        event = m.Event()
-
-
-    def is_up_to_date(self, code):
-        """
-        종목 토톤실의 가장 최근 글의 날짜와 DB에 저장된 가장 최근 글의 날짜를 비교하여,
-        DB가 최신인지 아닌지 여부를 반환함.
-        (nid를 비교하는 것이 더욱 정확하지만 date로 비교해도 문제는 없다.)
-        주의!: 최신글이 답변글인 경우, 글이 게시판 최상단에 위치하지 않아 True가 반환된다.
-        """
-        req = requests.get(BASE_URL + '/item/board.nhn?code=' + code)
-        page_soup = BeautifulSoup(req.text, 'lxml')
-        web_latest_date = page_soup.select_one('tbody > tr:nth-of-type(3) > td:nth-of-type(1) > span')
-        web_latest_date = pd.to_datetime(web_latest_date.text)
-
-        db_latest_date = self.db.latest_date.get(code, 0)
-        if db_latest_date == 0:
-            return False
-        elif db_latest_date < web_latest_date:
-            return False
-        else:
-            return True
-
-    def fetch_one(self, code):
-        print(code, end=' ')
-        if self.is_up_to_date(code):
-            print('\r'+code+': Already up-to-date')
-        else:
-            t = time.time()
-            df = self.fetch_by_code(code)
-            print('({:.2f}sec)                 '.format(time.time() - t))
-            self.db.write(code, df)
-            del df
 
     def fetch_all(self):
         """
