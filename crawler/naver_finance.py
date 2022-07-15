@@ -6,7 +6,6 @@ import pandas as pd
 import requests
 import multiprocessing
 from bs4 import BeautifulSoup
-from multiprocessing import Pool
 from fake_useragent import UserAgent
 
 
@@ -113,17 +112,18 @@ class Crawler:
             posts['opinion'] = post_info[7]
             posts['content'] = content
             posts['comments'] = comments
+            print(posts)
             return posts
 
-        pool = multiprocessing.pool.ThreadPool(10)
+        pool = multiprocessing.Pool(10)
         posts = [pool.apply_async(fetch_by_post, args={top_post: top_post})
                  for top_post in top_post_list]
         pool.close()
         pool.join()
         posts = [post.get() for post in posts]
-
+        print(posts)
         # list of dict -> dict of list
-        posts = {k: [dic[k] for dic in posts] for k in posts[0]}
+        # posts = {k: [dic[k] for dic in posts] for k in posts[0]}
         return posts
 
     def fetch_by_code(self, code, datum_point=10):
@@ -143,7 +143,7 @@ class Crawler:
             total_page_num = 1
 
         print('total_pages={}'.format(total_page_num), end=' ', flush=True)
-        pool = Pool(self.n_process)
+        pool = multiprocessing.Pool(self.n_process)
         m = multiprocessing.Manager()
         event = m.Event()
 
@@ -181,3 +181,9 @@ class Crawler:
             except:
                 print('Failed:{}'.format(code))
                 continue
+
+if __name__ == '__main__':
+    multiprocessing.freeze_support()
+    c = Crawler(10)
+    b = c.fetch_by_page(code='005930', page=9)
+    print(b)
