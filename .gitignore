@@ -4,3 +4,5 @@ test/
 .ipynb_checkpoints/
 .gitignore
 .DS_Store
+*.pyc
+__pycache__/
