@@ -1,14 +1,8 @@
-# import asyncio
-# from crawler.async_naver_finance import Crawler
-# from crawler.async_naver_finance import main
-
-# if __name__ == '__main__':
-#     asyncio.run(main())
-
-
 import asyncio
-from crawler.async_dcinside import Crawler
-from crawler.async_dcinside import main
+from crawler.naver_finance_async import nf_main
+from crawler.dcinside_async_v1 import dc_main
 
-if __name__ == '__main__':
-    asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(nf_main())
+    asyncio.run(dc_main())

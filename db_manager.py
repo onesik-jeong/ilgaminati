@@ -8,18 +8,18 @@ Post = namedtuple(
 )
 
 
-def send_to_ilgaminati(post: Post):
+def send_to_ilgaminati(post: dict):
     return requests.post(
-        "https://hxx059yi92.execute-api.ap-northeast-2.\
-            amazonaws.com/api/crawling/posts",
+        "https://hxx059yi92.execute-api.ap-northeast-2."
+        "amazonaws.com/api/crawling/posts",
         json={
-            "title": post.title,
-            "author": post.author,
-            "content": post.content,
-            "stock_name": post.stock_name,
-            "likes": int(post.likes),
-            "dislikes": int(post.dislikes),
-            "views": int(post.views),
-            "reg_ts": post.reg_ts,
+            "title": post["title"],
+            "author": post["author"],
+            "content": post["content"],
+            "stock_name": post["stock_name"],
+            "likes": int(post["likes"]),
+            "dislikes": int(post["dislikes"]),
+            "views": int(post["views"]),
+            "reg_ts": post["reg_ts"],
         },
     )
